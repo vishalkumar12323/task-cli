@@ -1,4 +1,4 @@
-const { execSync } = require("child_process");
+const { exec } = require("node:child_process");
 const { argv } = require("process");
 const path = require("path");
 const fs = require("node:fs");
@@ -7,6 +7,7 @@ const {
   IGNORED_FILES,
   IGNORED_FOLDERS,
   DEFAULT_LINT_MODE,
+  MAX_PARALLEL,
 } = require("../utils/constants.js");
 const log = require("../utils/log.js");
 
@@ -14,8 +15,9 @@ const args = argv.slice(2);
 const directory = args[0] || process.cwd();
 const absolutePath = path.resolve(process.cwd(), directory);
 
-const modeArg = args.find((arg) => arg.startsWith("--mode="));
-const mode = modeArg ? modeArg.split("=")[1] : DEFAULT_LINT_MODE;
+const flags = args.find((arg) => arg.startsWith("--mode="));
+const mode = flags ? flags.split("=")[1] : DEFAULT_LINT_MODE;
+
 // Recursively find all files in the directory
 function findFiles(dir) {
   let results = [];
@@ -38,49 +40,61 @@ function findFiles(dir) {
   return results;
 }
 
-const fileToLint = findFiles(absolutePath);
-if (fileToLint.length === 0) {
+const filesToLint = findFiles(absolutePath);
+if (filesToLint.length === 0) {
   log(`No lintable files found in directory ${absolutePath}.`, "info");
   process.exit(0);
 }
 
-const esLintConfigFile = path.join(__dirname, "../..", "eslint.config.cjs");
-
 log(
-  `Linting ${fileToLint.length} files in ${mode.toUpperCase()} mode...`,
+  `Linting ${filesToLint.length} files in ${mode.toUpperCase()} mode...\n`,
   "info"
 );
-let hasErrors = false;
-fileToLint.forEach((file) => {
-  log(`Linting  ${file}`, "file");
 
-  try {
-    const result = execSync(
-      `npx eslint --config "${esLintConfigFile}" "${file}"`,
-      {
-        cwd: absolutePath,
-        stdio: "pipe",
+const esLintConfigFile = path.join(__dirname, "../..", "eslint.config.cjs");
+let hasErrors = false;
+
+function runLintCommand(filePath) {
+  return new Promise((resolve) => {
+    log(`Linting  ${filePath}`, "file");
+    exec(
+      `npx eslint --config "${esLintConfigFile}" "${filePath}"`,
+      { cwd: absolutePath },
+      (error, stdout, stderr) => {
+        if (stdout) console.log(stdout);
+        if (stderr) console.log(stderr);
+        if (error) hasErrors = true;
+        resolve();
       }
     );
-
-    if (result.toString()) {
-      console.log(result.toString());
-    }
-  } catch (error) {
-    hasErrors = true;
-    if (error.stdout) {
-      console.log(error.stdout.toString());
-    }
-    if (error.stderr) {
-      console.log(error.stderr.toString());
-    }
-  }
-});
-
-if (hasErrors) {
-  log("Linting finished with errors.", "error");
-  process.exit(1);
-} else {
-  log("All files linted successfully with no errors.", "success");
-  process.exit(0);
+  });
 }
+
+async function runSequential(files) {
+  for (const file of files) {
+    await runLintCommand(file);
+  }
+}
+
+async function runParallel(files, batchSize = MAX_PARALLEL) {
+  for (let i = 0; i < files.length; i += batchSize) {
+    const batch = files.slice(i, i + batchSize).map(runLintCommand);
+    await Promise.all(batch);
+  }
+}
+
+(async () => {
+  if (mode === "sequential") {
+    await runSequential(filesToLint);
+  } else {
+    await runParallel(filesToLint);
+  }
+
+  if (hasErrors) {
+    log("Linting finished with errors.", "error");
+    process.exit(1);
+  } else {
+    log("All files linted successfully.", "success");
+    process.exit(0);
+  }
+})();

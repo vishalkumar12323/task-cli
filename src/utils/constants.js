@@ -1,6 +1,6 @@
 module.exports = {
   VALID_EXTENSIONS: [".js", ".jsx", ".ts", ".tsx"],
-  IGNORED_FOLDERS: ["node_modules", ".git"],
+  IGNORED_FOLDERS: ["node_modules", ".git", ".next", "dist", "build"],
   IGNORED_FILES: [
     "package.json",
     "package-lock.json",
@@ -12,6 +12,10 @@ module.exports = {
     ".prettierrc",
     ".prettierrc.js",
     ".prettierrc.json",
+    "tailwindcss.config.js",
+    "tsconfig.json",
+    "next.config.json",
   ],
   DEFAULT_LINT_MODE: "parallel",
+  MAX_PARALLEL: 5,
 };
